@@ -1,48 +1,65 @@
 import streamlit as st
+import pickle
+import numpy as np
 import faiss
-import pandas as pd
 from sentence_transformers import SentenceTransformer
 
-# -------------------------
-# Load Data and Model
-# -------------------------
+# -------------------------------
+# Load FAISS index and corpus
+# -------------------------------
 @st.cache_resource
-def load_model_and_data():
+def load_resources():
+    index = faiss.read_index("medquad_index.faiss")
+    with open("corpus.pkl", "rb") as f:
+        corpus = pickle.load(f)
     model = SentenceTransformer('all-MiniLM-L6-v2')
-    df = pd.read_csv('medquad.csv')
-    index = faiss.read_index('medquad_index.faiss')
-    return model, df, index
+    return index, corpus, model
 
-model, df, index = load_model_and_data()
+index, corpus, model = load_resources()
 
-# -------------------------
-# Streamlit App Layout
-# -------------------------
-st.set_page_config(page_title="🩺 MedBot - Medical Q&A Assistant", page_icon="💬", layout="centered")
+# -------------------------------
+# Helper function
+# -------------------------------
+def get_answer(query):
+    query_vector = model.encode([query])
+    D, I = index.search(np.array(query_vector).astype('float32'), k=1)
+    best_match = corpus[I[0][0]]
+    return best_match
 
-st.title("🩺 MedBot")
-st.markdown("### Your AI Medical Assistant")
-st.write("Ask any medical question based on the **MedQuAD dataset** below:")
+# -------------------------------
+# Streamlit UI
+# -------------------------------
+st.set_page_config(page_title="🧠 MedBot", page_icon="💬", layout="wide")
 
-# -------------------------
-# User Query Input
-# -------------------------
-query = st.text_input("💬 Enter your medical question:")
+# Sidebar section
+with st.sidebar:
+    st.title("💬 MedBot - Medical Q&A")
+    st.markdown("""
+    **Developed by:** Sarthak Sarode  
+    **Dataset:** [MedQuAD](https://github.com/abachaa/MedQuAD)  
+    **Model:** all-MiniLM-L6-v2  
+    **Description:**  
+    This chatbot retrieves medically accurate answers from the MedQuAD dataset using FAISS for semantic similarity search.
+    """)
+    st.info("⚠️ Disclaimer: This chatbot is for educational purposes only and not a substitute for professional medical advice.")
 
-if query:
-    # Encode query and search FAISS index
-    query_vec = model.encode([query])
-    distances, indices = index.search(query_vec, k=3)
+st.title("🧠 MedBot - Conversational Medical Q&A")
 
-    # Retrieve top results
-    results = df.iloc[indices[0]]
-    
-    st.markdown("### 🧠 Top Answers")
-    for i, row in results.iterrows():
-        st.markdown(f"**Q:** {row['question']}")
-        st.markdown(f"**A:** {row['answer']}")
-        st.write("---")
-else:
-    st.info("Type a question to get started...")
+# Initialize session state for conversation
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
-st.markdown("⚕️ *Powered by FAISS and Sentence Transformers*")
+# Input box for user query
+user_query = st.chat_input("Ask a medical question...")
+
+if user_query:
+    with st.spinner("Searching for answer..."):
+        response = get_answer(user_query)
+        st.session_state.chat_history.append({"query": user_query, "answer": response})
+
+# Display chat history
+for chat in st.session_state.chat_history:
+    with st.chat_message("user"):
+        st.markdown(chat["query"])
+    with st.chat_message("assistant"):
+        st.markdown(chat["answer"])
